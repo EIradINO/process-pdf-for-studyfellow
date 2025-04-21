@@ -211,7 +211,8 @@ def analyze_problem(question: str, answer: str) -> str:
         model = genai.GenerativeModel(
             'gemini-2.5-pro-preview-03-25',
             system_instruction='''
-            あなたは優秀な物理学者です。与えられた問題文と解答を以下の指標に従って詳細に分析してください。
+            あなたは優秀な物理学者です。与えられた問題文と解答を以下の指標に従って詳細に分析してください。数式はTex形式で出力してください。
+            結果のみ出力してください。
 
             問題設定の要約:
                 扱っている物理現象・状況の簡単な説明（例：単振り子の運動、RLC回路の過渡現象、気体の状態変化と熱効率）
@@ -439,6 +440,8 @@ def process_workbook(problems_file, target_file_name):
                         doc['id']
                     )
             
+            # 処理完了後にstatusを更新
+            supabase.table('document_metadata').update({'status': 'processed_divided'}).eq('file_name', file_name).execute()
             print(f"ファイル {file_name} の処理が完了しました")
             
         except Exception as e:
@@ -449,10 +452,52 @@ def process_workbook(problems_file, target_file_name):
         return None
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("使用方法: python3 transcribe_workbook.py target_file_name problem_numbers/sample.json")
-        sys.exit(1)
+    # Supabaseクライアントの初期化
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    supabase: Client = create_client(supabase_url, supabase_key)
     
-    target_file_name = sys.argv[1]
-    problems_file = sys.argv[2]
-    process_workbook(problems_file, target_file_name)
+    # deleted_appliedステータスのドキュメントを取得して削除処理
+    delete_response = supabase.table('document_metadata').select("*").eq('status', 'deleted_applied').execute()
+    
+    if delete_response.data:
+        print("\n=== 削除対象のドキュメントの処理を開始します ===")
+        for doc in delete_response.data:
+            doc_id = doc.get('id')
+            file_name = doc.get('file_name')
+            if not doc_id:
+                continue
+                
+            try:
+                # workbook_transcriptionsテーブルから関連データを削除
+                supabase.table('workbook_transcriptions').delete().eq('document_id', doc_id).execute()
+                print(f"ドキュメント {file_name} の関連データを削除しました")
+                
+                # document_metadataのstatusを更新
+                supabase.table('document_metadata').update({'status': 'deleted'}).eq('id', doc_id).execute()
+                print(f"ドキュメント {file_name} のステータスを更新しました")
+            except Exception as e:
+                print(f"ドキュメント {file_name} の削除処理中にエラーが発生しました: {str(e)}")
+    
+    # processedステータスのworkbookファイルを取得
+    response = supabase.table('document_metadata').select("*").eq('bucket', 'workbooks').eq('status', 'processed').execute()
+    
+    if not response.data:
+        print("処理対象のファイルが見つかりませんでした。")
+        sys.exit(0)
+    
+    # 各ファイルを処理
+    for doc in response.data:
+        file_name = doc.get('file_name')
+        if not file_name:
+            continue
+            
+        # JSONファイル名を生成（.pdfを.jsonに置換）
+        json_file = 'problem_numbers/' + file_name.replace('.pdf', '.json')
+        
+        if not os.path.exists(json_file):
+            print(f"JSONファイル {json_file} が見つかりませんでした。スキップします。")
+            continue
+        
+        print(f"\n=== {file_name} の処理を開始します ===")
+        process_workbook(json_file, file_name)
