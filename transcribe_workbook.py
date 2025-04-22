@@ -211,7 +211,7 @@ def analyze_problem(question: str, answer: str) -> str:
         model = genai.GenerativeModel(
             'gemini-2.5-pro-preview-03-25',
             system_instruction='''
-            あなたは優秀な物理学者です。与えられた問題文と解答を以下の指標に従って詳細に分析してください。数式はTex形式で出力してください。
+            あなたは優秀な物理学者です。与えられた問題文と解答を以下の指標に従って詳細に分析しMarkdown形式で出力してください。数式はTex形式で出力してください。
             結果のみ出力してください。
 
             問題設定の要約:
